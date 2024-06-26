@@ -6,5 +6,6 @@ an NMT system from scratch. This was jointly completed by Samuel and Eric.
 The code is based on [Binh Tang's NMT Tutorial](https://github.com/tangbinh/machine-translation)
 and the data is a sample of [Europarl](http://www.statmt.org/europarl/).
 
-
- 
+::TODO::
+- Local setup guidance
+- Overview of repository structure
