@@ -1,0 +1,338 @@
+### Q1
+1-A-1:
+    src_mask.size = [batch_size, 1, src_time_steps]
+    attn_scores.size = [batch_size, 1, src_time_steps]
+    attn_weights.size = [batch_size, 1, src_time_steps]
+    attn_context.size = [batch_size, output_dims]
+    context_plus_hidden.size = [batch_size, input_dims + output_dims]
+    attn_out.size = [batch_size, output_dims]
+1-A-2:
+    The mask is applied to the attention scores to deal with sentences of
+    different lengths. Shorter sentences are padded with -inf so that when
+    softmax is applied the attn_weights for these evaluate to 0. This makes the
+    attention mechanism ignore the tokens that were padded with -inf.
+1-B-1:
+    projected_encoder_out.size = [batch_size, output_dims, src_time_steps]
+    attn_scores.size = [batch_size, 1, src_time_steps]
+1-B-2:
+    The encoder output is projected using a linear layer to the dimensions of
+    output_dims. This is then transposed so that the dimensions match up with
+    dimensions needed to work with tgt_input. The tgt_input is then unsqueezed
+    and batch matrix multiplication of the unsqueezed tgt_input and the
+    projected encoder output is performed to obtain the attn score.
+1-C-1:
+    Cached state is None when nothing is fed into the incremental_state
+    parameter, which happens when the model isn't run in incremental mode. It is
+    also none when the key 'cached_state' is not in the incremental_state
+    dictionary, which should happen at the start of the model run.
+1-C-2:
+    input_feed is the output from the previous time step and is concatenated to
+    the current token embedding. This is then used as LSTM input for the current
+    timestep. If attention is used, input_feed is attended to before being used
+    as input to the LSTM for the current iteration.
+1-D-1:
+    The previous target state is given to the attention function to calculate
+    the attention weights for the current target state. This is due to how
+    attention is defined, its calculation depends on the previous state.
+1-D-2:
+    The dropout layer helps to prevent overfitting and over-parameterization of
+    the model. By setting layer units to 0 at random, the model needs to learn
+    more robust features and is more likely to generalise well to the test data.
+1-E-1:
+    output.size = [batch_size, tgt_time_steps, len(dictionary)]
+1-E-2:
+    # Compute the output of the model and attention scores by providing
+    # source tokens, source lengths and target inputs to the model.
+    # Attention weights are not ignored.
+    output, _ = model(sample['src_tokens'], sample['src_lengths'], sample['tgt_inputs'])
+
+    # This calculates the cross-entropy loss between the output and the target tokens.
+    # It is normalised by the number of tokens in the source sentence.
+    loss = \
+        criterion(output.view(-1, output.size(-1)), sample['tgt_tokens'].view(-1)) / len(sample['src_lengths'])
+
+    # This is calculates the gradients of the loss with respect to the model parameters,
+    # in a backward pass.
+    loss.backward()
+    # clip_grad_norm is used to prevent the gradients from becoming too large.
+    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
+    # This takes a step in the direction of the gradients, updating the model parameters.
+    optimizer.step()
+    # Reset the gradients to zero to prepare for the next iteration.
+    optimizer.zero_grad()
+
+### Q2
+2-1:
+    Split by whitespace, there are 124031 tokens in the English data with 8326
+    word types. 112572 tokens in the German data with 12504 word types.
+2-2:
+    In the English data, 3909 tokens will be replaced; the total vocabulary size
+    before is 8326, after is 4417. In German, 7460 tokens will be replaced; the
+    total vocabulary size before is 12504, after is 5044.
+2-3:
+    Inspecting the replaced words, we can divide them into two categories:
+    uncommon words and common words. While there are some uncommon words
+    (especially numbers and proper nouns), the common word category is dominant.
+    It is noticeable that many of these common words share the same root (e.g.
+    [cite, cited, cites]), due to morphology and inflection of
+    the two languages. Lemmatisation could be used to handle this during
+    tokenisation as it reduces a word to its base form.
+
+    For German, the uncommon word cateogry seems to be larger due to compound
+    words (e.g. bodenabfertigungsdienste). Special rule-based tokenisation
+    / sub-word tokenisation could be used to handle these.
+2-4:
+    There are 1460 shared tokens between the two languages (478 if removing UNK
+    tokens). Disregarding false friends, this similarity could be exploited by
+    using them as "anchors" to help align the two languages, based on the
+    assumption that the shared tokens will be used in a similar context.
+2-5:
+    Sentence length:
+        For NMT, translation quality is expected to perform worse as sentence
+        length increases [1]. In the context of our model, this has also been
+        shown for attention-based LSTM models [2].
+
+        This can be attributed to the vanishing gradient problem where the
+        gradients become too small to be useful for learning as the sequence
+        length increases.
+
+        The choice of tokenisation processes affects token counts and sentence
+        lengths (e.g. non-compound-splitting tokenisation would lead to shorter
+        German sentences as English sentences). This further complicates the
+        translation task.
+    Tokenisation process:
+        The choice of tokenisation process directly affects the performance of
+        the NMT model. For example, the use of sub-word tokenisation (especially
+        optimised for German compound words in the context of this task) could
+        improve the translation quality as it increases the number of examples
+        for the subtokens [3].
+    Unknown words:
+        Replacing single-occuring words with UNK tokens is a trade-off between a
+        potential loss of information and reducing vocbulary size, hence making
+        the training process computationally less expensive.
+
+        The performance of the model, the UNK token replacement approach has
+        been observed to lead to worse translation quality as it effectively
+        1) removes meaning, 2) breaks the structure of sentences and 3) hence
+        hurts translation and reordering of in-vocabulary words [4].
+
+### Q3
+3-1:
+    Greedy decoding selects the token with the highest probability at each time
+    step. This could be problematic where the model makes a mistake early on and
+    is unable to recover from it later in the sequence because greedy decoding
+    only keeps one sequence continuation at a time.
+
+    Example:
+        Original:               "I am a student housing administrator."
+        Correct translation:    "Ich bin ein Studentenwohnheim-Verwalter."
+        Incorrect translation:  "Ich bin ein Schülerwohnheim-Verwalter."
+
+    In this example, the model makes a mistake early on by translating "student"
+    to "Schüler" instead of "Studenten". This is a likely mistake since
+    depending on the training data, "student" could be translated to "Schüler"
+    more often than "Studenten" as both are valid translations. However, with
+    greedy decoding the model cannot recover from this mistake and is unable to
+    instead maximise the probability of "student housing", which intuitively
+    would be more likely to be translated to Studentenwohnheim as accomodation
+    and housing is more prevalent in text for University students than for
+    school students due to the socio-economic history of German school students
+    typically living at home.
+
+    (We made the simplifying assumption that the NMT model would be able to
+    translate / continuate compounds correctly; this doesn't change the fact
+    that greedy decoding would still be problematic in this case.)
+3-2:
+    # Initialize the beam with the start symbol for each candidate
+    beam = [(start_symbol, 0.0, initial_state)] * beam width
+    # Beam width is the number of candidates to keep at each step
+
+    for t in range of max_length:
+        Initialise all_candidates to empty list;
+        for sequence, score, state in beam:
+            # Use the decoder to generate the probability of all words at current step
+            # p(w_t | w_1, ..., w_{t-1}, h) = decoder(w_{t-1}, h)
+            prob, new_state = decoder(sequence[-1], state)
+
+            # For each possible next word, create a new candidate sequence
+            for next_word in range of vocab_size:
+                # Extend the sequence with the next word
+                # w_t = append(next_word to w_t)
+                new_sequence = append(next_word to sequence)
+                # Update the score (log probability) of the sequence
+                # log p(w_1, ..., w_t | h) = log p(w_1, ..., w_{t-1} | h) + log p(w_t | w_1, ..., w_{t-1}, h)
+                new_score = score + log(prob[next_word])  # use log probabilities to avoid underflow
+                append((new_sequence, new_score, new_state)) to all candidates
+
+        # Keep only the top beam width candidates with the highest total scores
+        # (w_1, ..., w_t) = argmax_{w_1, ..., w_t} log p(w_1, ..., w_t | h)
+        # Sort and prune the candidates according to beam width
+        pruned candidates = prune(sort(all candidates), beam width)
+        beam = argmax_{total score}(pruned candidates)
+
+    # Return the candidate with the highest score
+    # (w_1, ..., w_T) = argmax_{w_1, ..., w_T} log p(w_1, ..., w_T | h)
+    return argmax_score(beam)
+3-3: [TODO]
+    - Often with beam search (and greedy decoding), the decoder will output
+      translations which are shorter than one would expect. How would you modify
+      the decoding process to encourage longer sentence generation?
+
+## Q4
+4-1:
+    python train.py --save-dir "${EXP_ROOT}" \
+                --log-file "${EXP_ROOT}/log.out"  \
+                --data "${DATA_DIR}" \
+				--encoder-num-layers 2 \
+				--decoder-num-layers 3 \
+4-2: [TODO]
+    - Report Q3 model results
+    - Answer questions below
+    Baseline:
+        Test BLEU: 11.29
+        Validation set perplexity: 27.3
+        Training loss: 2.131
+    Q3 model:
+        Test BLEU:
+        Validation set perplexity:
+        Training loss:
+    - What effect does this change have on dev-set perplexity, test BLEU score
+      and the training loss, in comparison to the baseline?
+    - Can you explain why it does worse/better on the training, dev, and test
+      sets than the baseline single layer model? Is there a difference between
+      the training set, dev set, and test set performance? Why is this the case?
+
+### Q5
+    [TODO]
+    - Screenshots of implementation changes
+    - Report results for model trained on entire data (not tiny)
+    - Explain how the change affects results compared to the baseline in terms
+      training set loss, dev perplexity, and test BLEU scores. Consider whether
+      the addition of lexical translation is beneficial or detrimental to
+      performance on these automatic metrics
+    - Compare output examples between baseline and lexical translation model.
+      In your report, you can discuss a trend you identify with a maximum of
+      five example output pairs.
+
+### Q6
+6-A-1:
+    embeddings.size = [batch_size, src_time_steps, num_features]
+
+6-A-2:
+    Positional embeddings are added to the input embeddings to provide information about the position of the token in the sequence.
+    This helps the model to understand the order of the tokens in the sequence which is particularly
+    important for an MT task since word order differs from language to language.
+    Transformers do not take the order of tokens into account by default so this
+    is a way to provide the model with this information.
+
+6-B-1:
+    self_attn_mask.size = [tgt_time_steps, tgt_time_steps] or None
+
+6-B-2:
+    The purpose of self_attn_mask is to prevent the decoder from attending to future tokens in the sequence
+    during training.
+
+6-B-3:
+	The mask is needed in the decoder because its supposed to generate the output tokens
+    sequentialy, so during inference it won't have generated future tokens so wouldn't be
+    able to use them. The encoder, on the other hand, is given all the input tokens at
+    once during inference, thus it has access to future tokens so a mask isn't needed during
+    training.
+
+6-B-4:
+    We are only decoding one token at a time, so there are no future tokens to
+    attend to.
+
+6-C-1:
+    The final output we want is a probability distribution over the
+    vocabulary. The linear projection is needed to map the output of the decoder
+    to the vocabulary size.
+
+6-C-2:
+    If features_only=True, the output would be the feature representation of the
+    last decoder layer.
+
+6-D:
+    Transformers work with fixed-size input, so we need to pad the input to the
+    same length. encoder_padding_mask is used to disregard the padding when
+    calculating the attention weights.
+
+6-E-1:
+    Encoder attention performs attention between the encoder's input and target sequence to create hidden
+    representations. It can be used to 'align' the input and target sequences and has access to the entire
+    encoder output.
+    Self attention is used to create hidden representations of the input sequence which can be used to assign
+    'importance' to different parts of the input. It aims to capture the dependencies between different words
+    in the input and only has access up to the current step in the sequence.
+
+6-E-2:
+    attn_mask is used to prevent the model from seeing future tokens when training.
+    key_padding_mask is used to stop the model from attending to padded tokens.
+
+6-E-3:
+    attn_mask is not needed because there are no problems with seeing the entire encoder output. The encoder
+    attention can have access to the entire encoder output while it's self attention that is only allowed
+    to see up to the current step in the sequence.
+
+
+Q4 results:
+Epoch 084: loss 2.45 | lr 0.0003 | num_tokens 13.4 | batch_size 10 | grad_norm 22.94 | clip 1
+Epoch 084: valid_loss 3.38 | num_tokens 13.8 | batch_size 500 | valid_perplexity 29.4
+BLEU = 9.25, 38.3/12.3/5.6/2.8 (BP=1.000, ratio=1.017, hyp_len=6402, ref_len=6295)
+
+Q5 results:
+Epoch 064: loss 1.822 | lr 0.0003 | num_tokens 13.4 | batch_size 10 | grad_norm 29.79 | clip 0.999
+Epoch 064: valid_loss 3.17 | num_tokens 13.8 | batch_size 500 | valid_perplexity 23.8
+BLEU = 13.23, 44.7/17.6/8.8/4.9 (BP=0.977, ratio=0.978, hyp_len=6154, ref_len=6295)
+
+Q7 results:
+Epoch 018: loss 1.31 | lr 0.0003 | num_tokens 13.4 | batch_size 10 | grad_norm 51.42 | clip 0.999
+Epoch 018: valid_loss 3.83 | num_tokens 13.8 | batch_size 500 | valid_perplexity 46
+BLEU = 11.17, 42.4/15.2/7.1/3.7 (BP=0.979, ratio=0.980, hyp_len=6167, ref_len=6295)
+
+---
+[1]: https://arxiv.org/pdf/1409.0473.pdf
+[2]: https://aclanthology.org/D15-1166.pdf
+[3]: https://arxiv.org/pdf/1812.08621.pdf
+[4]: https://www.ijcai.org/Proceedings/16/Papers/405.pdf
+
+Q3B IN PSEUDOCODE
+    \begin{algorithm}
+        \caption{Beam Search Algorithm}\label{beam_search}
+        \begin{algorithmic}[1]
+        \State \# Initialize the beam with the start symbol for each candidate
+            \State $beam \gets [(start\_symbol, 0.0, initial\_state)] * beam\_width$
+            \State \# Beam width is the number of candidates to keep at each step
+
+            \For{$t$ \textbf{in} range of max\_length}
+                \State Initialise $all\_candidates$ to empty list;
+                \For{$sequence, score, state$ \textbf{in} beam}
+                    \State \# Use the decoder to generate the probability of all words at current step
+                    \State $p(w_t | w_1, ..., w_{t-1}, h) = decoder(w_{t-1}, h)$
+                    \State $prob, new\_state = decoder(sequence[-1], state)$
+
+                    \State \# For each possible next word, create a new candidate sequence
+                    \For{$next\_word$ \textbf{in} range of vocab\_size}
+                        \State \# Extend the sequence with the next word
+                        \State $w_t = append(next\_word to w_t)$
+                        \State $new\_sequence = append(next\_word to sequence)$
+                        \State \# Update the score (log probability) of the sequence
+                        \State $log p(w_1, ..., w_t | h) = log p(w_1, ..., w_{t-1} | h) + log p(w_t | w_1, ..., w_{t-1}, h)$
+                        \State $new\_score = score + log(prob[next\_word])$  \Comment{use log probabilities to avoid underflow}
+                        \State $append((new\_sequence, new\_score, new\_state))$ to $all\_candidates$
+                    \EndFor
+
+                \State \# Keep only the top beam width candidates with the highest total scores
+                \State $(w_1, ..., w_t) = argmax_{w_1, ..., w_t} log p(w_1, ..., w_t | h)$
+                \State \# Sort and prune the candidates according to beam width
+                \State $pruned\_candidates = prune(sort(all\_candidates), beam\_width)$
+                \State $beam = argmax_{total score}(pruned\_candidates)$
+
+            \EndFor
+
+            \State \# Return the candidate with the highest score
+            \State $(w_1, ..., w_T) = argmax_{w_1, ..., w_T} log p(w_1, ..., w_T | h)$
+            \State \textbf{return} $argmax\_score(beam)$
+        \EndFor
+        \end{algorithmic}
+    \end{algorithm}

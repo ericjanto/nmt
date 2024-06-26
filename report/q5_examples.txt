@@ -1,0 +1,20 @@
+Example 1
+    original: herr präsident , mir geht es um den wortlaut bei einem bericht von frau randzio-plath .
+    gold: mr president , this is the text relating to the randzio - plath report .
+    base: mr president , i am surprised by the report of the committee on the report .
+    lexical: mr president , i am talking about the report of the report in mrs randzio - de mrs van report .
+    observation: the challenge at hand is to translate the rare compound surname "randzio-plath". The base model fails to maintain the semantic meaning of the sentence by completely omitting the name. The lexical model recognises the rare token and attempts a contextualised translation, but fails with the compound. Likely, "de mrs van" relates to an attempt of translating "plath". This shows that the lexical model seems to be more capable of remembering rare tokens due to having information about the context of the source sentence [ref to paper].
+
+Example 2
+    original: bravo , frau merkel , herzlichen glückwunsch !
+    gold: well done , mrs merkel , warm congratulations !
+    base: mrs gonzález , mrs van , have been done !
+    lexical: mrs ferrero - waldner , mrs ferrero , mrs short , mrs short , mrs short , mrs short , congratulations !
+    observation: in this example, both models fail to translate the name "merkel" correctly. Interestingly, the lexical model seems to "get stuck" while translating the name, generating a sequence of "mrs short" tokens. This suggests to us that the model does recognise rare tokens, attempts to do something about it but may not be hypertuned correctly for this translation task, allocating too much or too little surface area on the hypersphere to allocate to word embeddings [ref to paper]. The lexical model does manage to translate the "congratulations" part, which is a positive sign that the context of the source sentence was taken into account.
+
+Example 3
+    original: ( die sitzung wird um 13.40 uhr unterbrochen und um 15.00 uhr wiederaufgenommen . )
+    gold: ( the sitting was suspended at 1.40 p.m. and resumed at 3 p.m. )
+    base: ( the sitting was suspended at 11.40 p.m. and resumed at 9.00 a.m. )
+    lexical: ( the sitting was suspended at 12.10 a.m. and resumed at 3 p.m. )
+    observation: the lexical model seems to be more capable of translating the time of day than the base model. In this example, the base model fails to translate both of the times whereas the lexical only gets the first time wrong.
